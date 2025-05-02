@@ -5,13 +5,15 @@ import (
     "fmt" // 导入格式化输出相关的包
 )
 
+// 进行网络通信的组件，用来建立、监听、接受 TCP 连接（比如和别的节点通信）
 // TCPTransport 结构体定义了TCP传输层的基本属性
 type TCPTransport struct {
     listenAddr string // 监听地址（IP:端口）
     listener   net.Listener // TCP监听器
+	handlers   map[string]func(Message) // 新增，键类型为字符串，值类型是一个函数
 }
 
-// 创建新的TCPTransport实例的工厂函数
+// 相当于java构造器
 func NewTCPTransport(addr string) *TCPTransport {
     return &TCPTransport{
         listenAddr: addr,
@@ -34,12 +36,39 @@ func (t *TCPTransport) Start() error {
 func (t *TCPTransport) acceptLoop() {
     for { // 无限循环，持续接受连接
         conn, err := t.listener.Accept() // 接受新连接
+		// Accept()是一个阻塞式方法，程序会在这里停住，直到有人连进来
+		// 一旦有连接，就返回一个 conn，你就可以和这个客户端进行双向通信了
         if err != nil {
             fmt.Println("Accept error:", err) // 打印错误信息
             continue // 继续下一次循环
         }
-        fmt.Println("New connection from", conn.RemoteAddr()) // 打印连接来源
-        // TODO: handle message
-        conn.Close()
+        go func(c net.Conn) {
+            defer c.Close()
+
+            msg, err := ReceiveMessage(c)
+            if err != nil {
+                fmt.Println("Error decoding message:", err)
+                return
+            }
+
+            handler, ok := t.handlers[msg.Type]
+            if !ok {
+                fmt.Printf("❌ No handler for message type: %s\n", msg.Type)
+                return
+            }
+
+            handler(msg) // 👈 分发给注册的处理函数
+        }(conn)
     }
 }
+
+// 用来注册处理函数
+// 建立一个映射关系，将不同类型的消息（键/key）与相应的处理函数（值/value）关联起来
+// 优点：解耦了网络层（transport）和业务层（store、crypto）
+func (t *TCPTransport) OnMessage(msgType string, handler func(Message)) {
+    if t.handlers == nil {
+        t.handlers = make(map[string]func(Message))
+    }
+    t.handlers[msgType] = handler
+}
+
