@@ -10,6 +10,7 @@ type Message struct {
 	Data string
 }
 
+// 把文件通过tcp发送到server
 func SendMessage(conn net.Conn, msg Message) error {
 	encoder := gob.NewEncoder(conn)
 	return encoder.Encode(msg)
