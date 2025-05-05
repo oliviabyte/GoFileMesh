@@ -20,6 +20,8 @@ func main() {
 	// ✅ 上传文件
 	sendPing("localhost:3000")
 
+	time.Sleep(1 * time.Second)
+
 	// ✅ 然后再下载文件
 	sendGetFile("localhost:3000", "hello_from_client.txt")
 
@@ -69,11 +71,21 @@ func sendPing(addr string) {
 	}
 	defer conn.Close()
 
+	// 原始内容
+	rawContent := "This is some structured file content."
+
+	// ✅ 加密 content
+	encryptedContent, err := Encrypt(rawContent)
+	if err != nil {
+		fmt.Println("❌ Encryption error:", err)
+		return
+	}
+
 	// ✅ 构造结构化 payload
 	payload := StoreFilePayload{
 		Filename: "hello_from_client.txt",
 		Filetype: "text/plain",
-		Content:  "This is some structured file content.",
+		Content:  encryptedContent,
 	}
 
 	bytes, err := json.Marshal(payload)
@@ -118,5 +130,12 @@ func sendGetFile(addr, filename string) {
 		fmt.Println("Receive error:", err)
 		return
 	}
-	fmt.Println("📥 File content received:", response.Data)
+
+	// ✅ 尝试解密内容
+	decrypted, err := Decrypt(response.Data)
+	if err != nil {
+		fmt.Println("❌ Decryption error:", err)
+		return
+	}
+	fmt.Println("📥 File content received (decrypted):", decrypted)
 }
