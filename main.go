@@ -8,27 +8,46 @@ import (
 	"net"
 	"time"
 
+	"flag"
+
 	"github.com/heyxtanya/GoFileMesh/p2p"
 )
 
-func main() {
-	// 创建了一个独立的 goroutine
-	// 主线程继续执行，不会被 select {} 阻塞
-	go startServer(":3000")
-	time.Sleep(1 * time.Second) // 等待 server 启动
+type FileAnnouncement struct {
+	Filename string `json:"filename"`
+	Addr     string `json:"addr"` // eg. "localhost:3001"
+}
 
-	// ✅ 上传文件
-	sendPing("localhost:3000")
+func main() {
+	port := flag.String("port", "3000", "port to listen on")
+	peer := flag.String("peer", "", "peer to connect to (optional)")
+	download := flag.Bool("download", false, "whether to request the file after upload")
+	flag.Parse()
+
+	addr := ":" + *port
+	t := startServer(addr) // 👈 拿到返回的 transport 实例（含 peerMap）
 
 	time.Sleep(1 * time.Second)
 
-	// ✅ 然后再下载文件
-	sendGetFile("localhost:3000", "hello_from_client.txt")
+	if *peer != "" {
+		connectToPeer(*peer, t) // 👈 连接并注册 peer
 
+		// 上传文件
+		sendPing(*peer)
+
+		// 广播给其他节点（peerMap 中的所有人）
+		time.Sleep(500 * time.Millisecond)
+		broadcastNewFile("hello_from_client.txt", t) // 广播新文件名
+
+		if *download {
+			time.Sleep(1 * time.Second)
+			sendGetFile(*peer, "hello_from_client.txt") // 下载副本
+		}
+	}
 	select {} // 保持运行
 }
 
-func startServer(addr string) {
+func startServer(addr string) *p2p.TCPTransport {
 	t := p2p.NewTCPTransport(addr)
 
 	// ✅ 先注册所有处理函数
@@ -56,10 +75,18 @@ func startServer(addr string) {
 		p2p.SendMessage(conn, response)
 	})
 
-	// ✅ 最后再启动服务器
+	t.OnMessage("FILE_ANNOUNCEMENT", func(msg p2p.Message, conn net.Conn) {
+		var fa FileAnnouncement
+		json.Unmarshal([]byte(msg.Data), &fa)
+		fmt.Println("🛰  Peer announced new file:", fa.Filename)
+		go sendGetFile(fa.Addr, fa.Filename)
+	})
+
 	if err := t.Start(); err != nil {
 		panic(err)
 	}
+
+	return t
 }
 
 func sendPing(addr string) {
@@ -138,4 +165,31 @@ func sendGetFile(addr, filename string) {
 		return
 	}
 	fmt.Println("📥 File content received (decrypted):", decrypted)
+}
+
+// 建立连接并保存
+func connectToPeer(addr string, t *p2p.TCPTransport) {
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		fmt.Println("❌ Failed to connect to peer:", err)
+		return
+	}
+	t.AddPeer(conn) // 👈 添加进 peerMap
+}
+
+func broadcastNewFile(filename string, t *p2p.TCPTransport) {
+	announcement := FileAnnouncement{
+		Filename: filename,
+		Addr:     t.Addr(), // 👈 这是本节点对外暴露的端口
+	}
+	bytes, _ := json.Marshal(announcement)
+
+	msg := p2p.Message{
+		Type: "FILE_ANNOUNCEMENT",
+		Data: string(bytes),
+	}
+
+	for _, conn := range t.Peers() {
+		p2p.SendMessage(conn, msg)
+	}
 }

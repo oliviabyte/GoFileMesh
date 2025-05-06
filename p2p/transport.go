@@ -11,12 +11,29 @@ type TCPTransport struct {
 	listenAddr string                             // 监听地址（IP:端口）
 	listener   net.Listener                       // TCP监听器
 	handlers   map[string]func(Message, net.Conn) // 新增，键类型为字符串，值类型是一个函数
+	peers      map[string]net.Conn                // 👈 新增的字段，用于记录连接的节点
+}
+
+func (t *TCPTransport) AddPeer(conn net.Conn) {
+	t.peers[conn.RemoteAddr().String()] = conn
+}
+func (t *TCPTransport) Addr() string {
+	return t.listenAddr
+}
+
+func (t *TCPTransport) Peers() []net.Conn {
+	conns := []net.Conn{}
+	for _, conn := range t.peers {
+		conns = append(conns, conn)
+	}
+	return conns
 }
 
 // 相当于java构造器
 func NewTCPTransport(addr string) *TCPTransport {
 	return &TCPTransport{
 		listenAddr: addr,
+		peers:      make(map[string]net.Conn), // 👈 初始化
 	}
 }
 
